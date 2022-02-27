@@ -1,13 +1,19 @@
 
 using System.Net;
+using API.Errores;
 using API.Helpers;
+using API.Middleware;
 using Core.Interfaces;
 using Infraestructura.Datos;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+
+
+//// Configuración para Heroku
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
 
@@ -38,9 +44,26 @@ builder.Services.AddScoped(typeof(IRepositorio<>), typeof(Repositorio<>));
 builder.Services.AddAutoMapper(typeof(MappingProfiles));
 
 builder.Services.AddCors();
- 
+builder.Services.Configure<ApiBehaviorOptions>(options => 
+{
+    options.InvalidModelStateResponseFactory = actionContext => 
+    {
+        var errors = actionContext.ModelState
+                        .Where(e => e.Value.Errors.Count > 0)
+                        .SelectMany(x => x.Value.Errors)
+                        .Select(x => x.ErrorMessage).ToArray();
+
+        var errorResponse = new ApiValidationErrorResponse
+        {
+            Errors = errors
+        };
+        return new BadRequestObjectResult(errorResponse);
+    };
+});
 
 var app = builder.Build();
+
+app.UseMiddleware<ExceptionMiddleware>();
 
 // Aplicar las nuevas migraciones al ejecutar las migraciones
 using(var scope = app.Services.CreateScope())
@@ -71,7 +94,10 @@ using(var scope = app.Services.CreateScope())
 app.UseSwagger();
 app.UseSwaggerUI();
 
+app.UseStatusCodePagesWithReExecute("/errors/{0}");
+
 app.UseHttpsRedirection();
+
 
 app.UseCors(x => x.AllowAnyOrigin()
                     .AllowAnyMethod()
